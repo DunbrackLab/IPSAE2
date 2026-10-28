@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+title: "ipSAE2: Directional PAE-based confidence scoring for biomolecular complexes"
+message: "If you use ipSAE2, please cite this software release and the original ipSAE preprint. A separate ipSAE2 manuscript is in preparation."
+type: software
+authors:
+  - family-names: "Dunbrack"
+    given-names: "Roland L."
+    name-suffix: "Jr."
+version: "0.1.4"
+date-released: "2026-10-28"
+repository-code: "https://github.com/DunbrackLab/IPSAE2"
+license: MIT

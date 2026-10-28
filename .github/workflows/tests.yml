@@ -1,0 +1,30 @@
+name: Python tests
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  tests:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        python-version: ['3.10', '3.12']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e . pytest
+      - name: Test
+        run: python -m pytest -q
+      - name: CLI smoke test
+        run: |
+          ipsae --version
+          ipsae tests/data/model.pdb tests/data/pae.json tests/data/summary.json --output example_ipsae.tsv
+          python -c "import pandas as pd; assert len(pd.read_csv('example_ipsae.tsv', sep='\t')) == 3"

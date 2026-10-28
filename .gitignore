@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+# macOS
+.DS_Store
+# Typical generated ipSAE output
+*_ipsae.tsv
+ipsae_all.tsv
+*_ipsae_by_token.tsv
+*_token_df.tsv
+*_atom_df.tsv
+*_pae_df.tsv
+*_interface.tsv
+*_interface.pml
+*_pae.png
