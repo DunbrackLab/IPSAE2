@@ -31,6 +31,14 @@ ipsae --version
 Installed dependencies: NumPy, pandas, SciPy and Gemmi. For optional PAE
 plots, install `python -m pip install '.[plot]'` from the repository.
 
+## To activate ipSAE in a new terminal session, 
+
+if path_to_IPSAE2 is the IPSAE2 directory above
+
+```
+source path_to_IPSAE2/.venv/bin/activate
+```
+
 ## Run one model
 
 Provide coordinates (`.pdb`, `.cif` or `.mmcif`) and PAE (`.json` or `.npz`),
