@@ -32,7 +32,8 @@ def parse_args(argv=None):
     ap.add_argument("--write-pae-png", action="store_true")
     ap.add_argument("--write-interface", action="store_true", help="Write contacting-residue selections")
     ap.add_argument("--write-pymol", action="store_true", help="Write PyMOL selections for contacting residues")
-    a = ap.parse_args(argv)
+    # Accept flags before, after, or between the positional input files.
+    a = ap.parse_intermixed_args(argv)
     if not (len(a.files) == 1 and Path(a.files[0]).is_dir()) and len(a.files) not in (2,3):
         ap.error("Supply a directory or exactly 2 or 3 input files")
     if a.dry_run and not (len(a.files) == 1 and Path(a.files[0]).is_dir()):

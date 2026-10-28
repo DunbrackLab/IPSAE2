@@ -1,6 +1,6 @@
 # ipSAE2 — directional PAE-based interaction confidence
 
-**Alpha release 0.1.4** for the ipSAE2 preprint. Built from the
+**Alpha release 0.1.5** for the ipSAE2 preprint. Built from the
 Dunbrack laboratory's `build_pae_data11.py`, `ipsae_scores7.py`, and
 `native_iptm2.py` prototypes. MIT license.
 
@@ -273,7 +273,7 @@ illustrative and do not represent a biological example.
   each of its PAE tokens.
 
 
-## Version 0.1.4 changes
+## Version 0.1.5 changes
 
 - A **single polymer chain containing both RNA and DNA** is now labeled `NUC_N`
   (for example `NUC_109`), rather than `DNA/RNA_N`. An all-RNA chain is
@@ -296,7 +296,7 @@ ipsae tests/data/model.pdb tests/data/pae.json tests/data/summary.json --output 
 cat mac_test.tsv
 ```
 
-The version should be `ipSAE2 0.1.4`; the sample input should produce a
+The version should be `ipSAE2 0.1.5`; the sample input should produce a
 three-row TSV. You can optionally run all bundled tests using
 `python -m pip install pytest` and, from the **parent directory**
 containing `ipsae2/`, `python -m pytest -q ipsae2/tests`. Running tests from

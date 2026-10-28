@@ -8,7 +8,7 @@ import pytest
 from ipsae.contacts import MoleculeGeometry, contact_units
 from ipsae.readers import load_model, infer_tokens, read_atoms, classify
 from ipsae.scores import protein_d0, score_direction, calculate_scores, molecule_label
-from ipsae.cli import main
+from ipsae.cli import main, parse_args
 
 DATA = Path(__file__).parent / "data"
 
@@ -334,3 +334,38 @@ def test_mixed_rna_dna_uses_nuc_not_majority_type():
     t = pd.DataFrame(rows, columns=["chain","type","resnum","resname","unit_key"])
     assert molecule_label(t, "C", "nuc") == "NUC_10"
     assert molecule_label(t, "D", "nuc") == "NA_1"  # Unknown subtype, not demonstrably mixed.
+
+
+@pytest.mark.parametrize("layout", ["files_first", "flags_first", "interspersed"])
+def test_cli_accepts_arguments_in_any_order(tmp_path, layout):
+    """Regression: argparse.parse_args rejects interspersed optional arguments."""
+    c, p, n = (str(DATA / f) for f in ('model.pdb', 'pae.json', 'summary.json'))
+    out = str(tmp_path / 'order.tsv')
+    if layout == 'files_first':
+        argv = [c, p, n, '--output-file', out, '--contact-cutoff', '5']
+    elif layout == 'flags_first':
+        argv = ['--output-file', out, '--contact-cutoff', '5', c, p, n]
+    else:
+        argv = [c, '--output-file', out, p, '--contact-cutoff', '5', n]
+    parsed = parse_args(argv)
+    assert parsed.files == [c, p, n]
+    assert parsed.output == out
+    assert main(argv) == 0
+    rows = pd.read_csv(out, sep='\t')
+    assert len(rows) == 3
+    assert 'ipsae' in rows.columns
+
+
+@pytest.mark.parametrize("layout", ["files_first", "flags_first"])
+def test_cli_directory_accepts_either_order(tmp_path, layout):
+    root = tmp_path / 'models'
+    root.mkdir()
+    out = tmp_path / 'combined.tsv'
+    if layout == 'files_first':
+        argv = [str(root), '--dry-run', '--output-file', str(out)]
+    else:
+        argv = ['--dry-run', '--output-file', str(out), str(root)]
+    parsed = parse_args(argv)
+    assert parsed.files == [str(root)]
+    assert parsed.dry_run
+    assert parsed.output == str(out)

@@ -1,0 +1,170 @@
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -1,4 +1,10 @@
+ # Changelog
++
++## v0.1.5-alpha — 2026-10-28
++
++- Accept command-line options before, after, or between positional input files.
++- Added CLI argument-order tests; no changes to scoring or output columns.
++
+ 
+ ## v0.1.4-alpha — 2026-10-28
+ 
+--- a/CITATION.cff
++++ b/CITATION.cff
+@@ -6,7 +6,7 @@
+   - family-names: "Dunbrack"
+     given-names: "Roland L."
+     name-suffix: "Jr."
+-version: "0.1.4"
++version: "0.1.5"
+ date-released: "2026-10-28"
+ repository-code: "https://github.com/DunbrackLab/IPSAE2"
+ license: MIT
+--- a/README.md
++++ b/README.md
+@@ -1,7 +1,7 @@
+ # ipSAE2
+ 
+ **Directional PAE-based confidence scoring for biomolecular complexes**  
+-**Alpha release · v0.1.4**
++**Alpha release · v0.1.5**
+ 
+ ipSAE2 computes directional interface predicted aligned error (ipSAE) scores
+ from predicted coordinates and a PAE matrix. It supports protein, DNA, RNA,
+@@ -40,6 +40,14 @@
+ ipsae model.cif full_data.json summary_confidences.json
+ ipsae model.cif full_data.json
+ ipsae pae_model_0.npz model_0.cif confidence_model_0.json
++```
++
++Options may appear **before, after, or between** input filenames:
++
++```bash
++ipsae model.cif full_data.json --output-file result.tsv
++ipsae --output-file result.tsv model.cif full_data.json
++ipsae model.cif --output-file result.tsv full_data.json
+ ```
+ 
+ The default result is `model_ipsae.tsv` in the coordinate-file directory.
+--- a/docs/GITHUB_RELEASE.md
++++ b/docs/GITHUB_RELEASE.md
+@@ -28,8 +28,8 @@
+ ## Create a GitHub release
+ 
+ From the GitHub repository page, open Releases > Draft a new release.
+-Choose **Create new tag**: `v0.1.4-alpha`, targeting `main`.
+-Set title `ipSAE2 v0.1.4 — alpha` and mark **Pre-release**.
++Choose **Create new tag**: `v0.1.5-alpha`, targeting `main`.
++Set title `ipSAE2 v0.1.5 — alpha` and mark **Pre-release**.
+ Copy the release text below or use CHANGELOG.md.
+ 
+ Optional: attach a Python wheel. It is *not* required for installation;
+--- a/docs/REFERENCE.md
++++ b/docs/REFERENCE.md
+@@ -1,6 +1,6 @@
+ # ipSAE2 — directional PAE-based interaction confidence
+ 
+-**Alpha release 0.1.4** for the ipSAE2 preprint. Built from the
++**Alpha release 0.1.5** for the ipSAE2 preprint. Built from the
+ Dunbrack laboratory's `build_pae_data11.py`, `ipsae_scores7.py`, and
+ `native_iptm2.py` prototypes. MIT license.
+ 
+@@ -273,7 +273,7 @@
+   each of its PAE tokens.
+ 
+ 
+-## Version 0.1.4 changes
++## Version 0.1.5 changes
+ 
+ - A **single polymer chain containing both RNA and DNA** is now labeled `NUC_N`
+   (for example `NUC_109`), rather than `DNA/RNA_N`. An all-RNA chain is
+@@ -296,7 +296,7 @@
+ cat mac_test.tsv
+ ```
+ 
+-The version should be `ipSAE2 0.1.4`; the sample input should produce a
++The version should be `ipSAE2 0.1.5`; the sample input should produce a
+ three-row TSV. You can optionally run all bundled tests using
+ `python -m pip install pytest` and, from the **parent directory**
+ containing `ipsae2/`, `python -m pytest -q ipsae2/tests`. Running tests from
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@
+ 
+ [project]
+ name = "ipsae2"
+-version = "0.1.4"
++version = "0.1.5"
+ description = "Directional ipSAE scores for biomolecular structure predictions"
+ readme = "README.md"
+ requires-python = ">=3.10"
+--- a/src/ipsae/__init__.py
++++ b/src/ipsae/__init__.py
+@@ -1,2 +1,2 @@
+ """ipSAE2 directional PAE confidence scorer."""
+-__version__ = "0.1.4"
++__version__ = "0.1.5"
+--- a/src/ipsae/cli.py
++++ b/src/ipsae/cli.py
+@@ -32,7 +32,8 @@
+     ap.add_argument("--write-pae-png", action="store_true")
+     ap.add_argument("--write-interface", action="store_true", help="Write contacting-residue selections")
+     ap.add_argument("--write-pymol", action="store_true", help="Write PyMOL selections for contacting residues")
+-    a = ap.parse_args(argv)
++    # Accept flags before, after, or between the positional input files.
++    a = ap.parse_intermixed_args(argv)
+     if not (len(a.files) == 1 and Path(a.files[0]).is_dir()) and len(a.files) not in (2,3):
+         ap.error("Supply a directory or exactly 2 or 3 input files")
+     if a.dry_run and not (len(a.files) == 1 and Path(a.files[0]).is_dir()):
+--- a/tests/test_ipsae2.py
++++ b/tests/test_ipsae2.py
+@@ -8,7 +8,7 @@
+ from ipsae.contacts import MoleculeGeometry, contact_units
+ from ipsae.readers import load_model, infer_tokens, read_atoms, classify
+ from ipsae.scores import protein_d0, score_direction, calculate_scores, molecule_label
+-from ipsae.cli import main
++from ipsae.cli import main, parse_args
+ 
+ DATA = Path(__file__).parent / "data"
+ 
+@@ -334,3 +334,38 @@
+     t = pd.DataFrame(rows, columns=["chain","type","resnum","resname","unit_key"])
+     assert molecule_label(t, "C", "nuc") == "NUC_10"
+     assert molecule_label(t, "D", "nuc") == "NA_1"  # Unknown subtype, not demonstrably mixed.
++
++
++@pytest.mark.parametrize("layout", ["files_first", "flags_first", "interspersed"])
++def test_cli_accepts_arguments_in_any_order(tmp_path, layout):
++    """Regression: argparse.parse_args rejects interspersed optional arguments."""
++    c, p, n = (str(DATA / f) for f in ('model.pdb', 'pae.json', 'summary.json'))
++    out = str(tmp_path / 'order.tsv')
++    if layout == 'files_first':
++        argv = [c, p, n, '--output-file', out, '--contact-cutoff', '5']
++    elif layout == 'flags_first':
++        argv = ['--output-file', out, '--contact-cutoff', '5', c, p, n]
++    else:
++        argv = [c, '--output-file', out, p, '--contact-cutoff', '5', n]
++    parsed = parse_args(argv)
++    assert parsed.files == [c, p, n]
++    assert parsed.output == out
++    assert main(argv) == 0
++    rows = pd.read_csv(out, sep='\t')
++    assert len(rows) == 3
++    assert 'ipsae' in rows.columns
++
++
++@pytest.mark.parametrize("layout", ["files_first", "flags_first"])
++def test_cli_directory_accepts_either_order(tmp_path, layout):
++    root = tmp_path / 'models'
++    root.mkdir()
++    out = tmp_path / 'combined.tsv'
++    if layout == 'files_first':
++        argv = [str(root), '--dry-run', '--output-file', str(out)]
++    else:
++        argv = ['--dry-run', '--output-file', str(out), str(root)]
++    parsed = parse_args(argv)
++    assert parsed.files == [str(root)]
++    assert parsed.dry_run
++    assert parsed.output == str(out)

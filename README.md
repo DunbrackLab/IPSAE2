@@ -1,7 +1,7 @@
 # ipSAE2
 
 **Directional PAE-based confidence scoring for biomolecular complexes**  
-**Alpha release · v0.1.4**
+**Alpha release · v0.1.5**
 
 ipSAE2 computes directional interface predicted aligned error (ipSAE) scores
 from predicted coordinates and a PAE matrix. It supports protein, DNA, RNA,
@@ -40,6 +40,14 @@ with an optional native-confidence (`.json` or `.npz`) file **in any order**:
 ipsae model.cif full_data.json summary_confidences.json
 ipsae model.cif full_data.json
 ipsae pae_model_0.npz model_0.cif confidence_model_0.json
+```
+
+Options may appear **before, after, or between** input filenames:
+
+```bash
+ipsae model.cif full_data.json --output-file result.tsv
+ipsae --output-file result.tsv model.cif full_data.json
+ipsae model.cif --output-file result.tsv full_data.json
 ```
 
 The default result is `model_ipsae.tsv` in the coordinate-file directory.

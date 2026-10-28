@@ -28,8 +28,8 @@ appear and that Linux/macOS CI jobs pass.
 ## Create a GitHub release
 
 From the GitHub repository page, open Releases > Draft a new release.
-Choose **Create new tag**: `v0.1.4-alpha`, targeting `main`.
-Set title `ipSAE2 v0.1.4 — alpha` and mark **Pre-release**.
+Choose **Create new tag**: `v0.1.5-alpha`, targeting `main`.
+Set title `ipSAE2 v0.1.5 — alpha` and mark **Pre-release**.
 Copy the release text below or use CHANGELOG.md.
 
 Optional: attach a Python wheel. It is *not* required for installation;

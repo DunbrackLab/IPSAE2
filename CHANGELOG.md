@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.5-alpha — 2026-10-28
+
+- Accept command-line options before, after, or between positional input files.
+- Added CLI argument-order tests; no changes to scoring or output columns.
+
+
 ## v0.1.4-alpha — 2026-10-28
 
 First public **alpha** source snapshot. The Python package retains version
