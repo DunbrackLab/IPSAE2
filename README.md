@@ -1,7 +1,7 @@
 # ipSAE2
 
 **Directional PAE-based confidence scoring for biomolecular complexes**  
-**Alpha release · v0.1.7**
+**Alpha release · v0.1.8**
 
 ipSAE2 computes directional interface predicted aligned error (ipSAE) scores
 from predicted coordinates and a PAE matrix. It supports protein, DNA, RNA,
