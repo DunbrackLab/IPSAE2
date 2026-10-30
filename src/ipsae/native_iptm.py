@@ -19,6 +19,7 @@ Output DataFrame columns:
 from __future__ import annotations
 
 import json
+import gzip
 import os
 import re
 from typing import Any, Optional
@@ -45,10 +46,14 @@ def file_suffix(path: str) -> str:
     name = os.path.basename(path).lower()
     if name.endswith(".mmcif") or name.endswith(".cif"):
         return "cif"
+    if name.endswith(".pdb.gz"):
+        return "pdb"
     if name.endswith(".pdb"):
         return "pdb"
     if name.endswith(".npz"):
         return "npz"
+    if name.endswith(".json.gz"):
+        return "json"
     if name.endswith(".json"):
         return "json"
     return ""
@@ -58,7 +63,8 @@ def load_json_or_npz(path: str) -> dict[str, Any]:
     suffix = file_suffix(path)
 
     if suffix == "json":
-        with open(path, "r", encoding="utf-8") as handle:
+        opener = gzip.open if str(path).lower().endswith(".json.gz") else open
+        with opener(path, "rt", encoding="utf-8") as handle:
             obj = json.load(handle)
         # AF2/ColabFold PAE JSON may be a one-element list of dictionaries.
         if isinstance(obj, list) and len(obj) == 1 and isinstance(obj[0], dict):
@@ -139,6 +145,20 @@ def identify_input_files(
 
     structure_file = structures[0]
     other_files = [p for p in paths if p != structure_file]
+
+    # With exactly one coordinates file and one JSON/NPZ file, that data file
+    # must be the PAE input. Validate its contents in read_pae(), rather than
+    # loading large ColabFold JSONs just to discover the unambiguous role.
+    if len(other_files) == 1:
+        only = other_files[0]
+        if file_suffix(only) not in {"json", "npz"}:
+            raise ValueError(f"PAE input must be JSON or NPZ: {only}")
+        if verbose:
+            print("\nIdentified input files:")
+            print(f"  coordinates: {structure_file}")
+            print(f"  PAE:         {only}")
+            print("  confidence:  (from PAE file when available)")
+        return only, structure_file, None
 
     info = []
     for path in other_files:
@@ -421,11 +441,12 @@ def read_native_confidences(
     path: Optional[str],
     chain_ids: list[str],
     verbose: bool = False,
+    loaded_obj: Optional[dict[str, Any]] = None,
 ) -> tuple[Optional[dict[str, Any]], Optional[pd.DataFrame]]:
-    if path is None:
+    if path is None and loaded_obj is None:
         return None, None
 
-    summary = load_json_or_npz(path)
+    summary = loaded_obj if loaded_obj is not None else load_json_or_npz(path)
 
     pair_df, source_key = extract_native_pair_iptm(
         summary,

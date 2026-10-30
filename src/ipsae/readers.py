@@ -6,11 +6,12 @@ checks against source token-chain metadata and ambiguous policies.
 from dataclasses import dataclass
 from collections import OrderedDict
 import json
+import gzip
 from pathlib import Path
 import numpy as np
 import pandas as pd
 import gemmi
-from .native_iptm import identify_input_files, read_native_confidences
+from .native_iptm import identify_input_files, read_native_confidences, PAIR_IPTM_KEYS
 from .scores import scored_unit_key
 
 PROT = set("ALA ARG ASN ASP CYS GLN GLU GLY HIS ILE LEU LYS MET PHE PRO SER THR TRP TYR VAL SEC PYL".split())
@@ -32,8 +33,10 @@ def read_pae(path, key="pae"):
             for k in ("frame_mask", "asym_id", "token_asym_id", "plddt", "token_has_frame"):
                 if k in f:
                     metadata[k] = np.asarray(f[k])
-    elif suffix == ".json":
-        with open(path, encoding="utf-8") as f:
+            metadata["_embedded_confidence"] = {k: np.asarray(f[k]) for k in PAIR_IPTM_KEYS if k in f}
+    elif suffix == ".json" or str(path).lower().endswith(".json.gz"):
+        opener = gzip.open if str(path).lower().endswith(".json.gz") else open
+        with opener(path, "rt", encoding="utf-8") as f:
             obj = json.load(f)
         if isinstance(obj, list):
             if len(obj) != 1 or not isinstance(obj[0], dict):
@@ -46,6 +49,10 @@ def read_pae(path, key="pae"):
         for k in ("token_chain_ids", "token_res_ids", "token_has_frame", "token_asym_id", "atom_to_token_idx", "frame_mask", "asym_id", "plddt"):
             if k in obj:
                 metadata[k] = np.asarray(obj[k])
+        # ColabFold 1.5 has PAE and scalar ipTM in the same JSON, frequently
+        # alongside a second, large ptm_matrix. Capture only confidence keys
+        # here, so native ipTM can be read without parsing the 45 MB JSON again.
+        metadata["_embedded_confidence"] = {k: obj[k] for k in PAIR_IPTM_KEYS if k in obj}
     else:
         raise ValueError(f"PAE file must be .json or .npz: {path}")
     if pae.ndim != 2 or pae.shape[0] != pae.shape[1] or pae.size == 0:
@@ -67,10 +74,12 @@ def _clean(x):
 
 
 def read_atoms(path):
-    if Path(path).suffix.lower() == ".pdb":
+    if str(path).lower().endswith((".pdb", ".pdb.gz")):
         # Preserve PDB chain IDs, atom ordering, and residue numbers.
+        # ColabFold often distributes gzipped PDB files directly.
         rows = []
-        with open(path, encoding="utf-8") as f:
+        opener = gzip.open if str(path).lower().endswith(".pdb.gz") else open
+        with opener(path, "rt", encoding="utf-8") as f:
             for line in f:
                 rec = line[:6].strip()
                 if rec == "ENDMDL":
@@ -355,6 +364,8 @@ def load_model(files, pae_key="pae", verbose=True):
     tokens["frame_valid"] = mask
     # Reuse native confidences in the PAE file when no distinct third file was passed.
     native_path = conf_file or pae_file
-    _, native = read_native_confidences(native_path, list(dict.fromkeys(tokens.chain)))
+    embedded = metadata.get("_embedded_confidence") if conf_file is None else None
+    _, native = read_native_confidences(native_path, list(dict.fromkeys(tokens.chain)),
+                                        loaded_obj=embedded)
     return ModelData(pae, atoms, tokens, native, policy, frame_policy,
                      (pae_file, coords_file, conf_file))

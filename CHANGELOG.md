@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.1.7-alpha — 2026-10-30
+
+- Support standard ColabFold 1.5 `scores_*.json.gz` files for both PAE and native scalar ipTM.
+- Match `JOB_scores_rank_NNN_...json.gz` with `JOB_unrelaxed_rank_NNN_...pdb.gz` (or relaxed PDBs), retaining full rank/model/seed identity.
+- Avoid scoring a ColabFold prediction twice when both relaxed and unrelaxed coordinate files are present; prefer unrelaxed, with relaxed-only fallback.
+- Retain existing AF3/Boltz-2 score algorithms and other batch matching rules.
+
+
+## v0.1.6-alpha — 2026-10-30
+
+- Tested ColabFold 1.5 two-file PDB/JSON inputs, including `.pdb.gz` models.
+- Import ColabFold's scalar native ipTM from the PAE JSON for a two-chain model.
+- Avoid reloading giant combined PAE/ipTM JSON files for native confidences.
+- Match ColabFold's `scores_` JSONs against `unrelaxed_` / `relaxed_` PDBs in directory mode.
+- Retain AF3/Boltz-2 numerical scoring and the v0.1.5 CLI unchanged.
+
 ## v0.1.5-alpha — 2026-10-28
 
 - Accept command-line options before, after, or between positional input files.

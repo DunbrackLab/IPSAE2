@@ -5,19 +5,30 @@ Models with ambiguous matching files are skipped with an explicit diagnostic
 instead of silently producing scientifically invalid scores.
 """
 import os
+import re
 from pathlib import Path
 
-COORD_EXTENSIONS = {'.pdb', '.cif', '.mmcif'}
-DATA_EXTENSIONS = {'.json', '.npz'}
+COORD_EXTENSIONS = {'.pdb', '.cif', '.mmcif', '.pdb.gz'}
+DATA_EXTENSIONS = {'.json', '.json.gz', '.npz'}
 SKIP_DIRS = {'.git', '.venv', '__pycache__', '.pytest_cache', 'node_modules',
              'build', 'dist', '.mypy_cache', '.tox'}
 
 
 def model_key(path):
     """Strip file-role prefixes/suffixes while retaining seed/model numbers."""
-    s = Path(path).stem.lower()
+    name = Path(path).name.lower()
+    if name.endswith(('.pdb.gz', '.json.gz')):
+        s = name[:-7 if name.endswith('.pdb.gz') else -8]
+    else:
+        s = Path(path).stem.lower()
+    # Standard ColabFold prepends the job name before the file-role marker:
+    # job_relaxed_rank_001_...pdb.gz, job_unrelaxed_rank_001_...pdb.gz,
+    # job_scores_rank_001_...json.gz. Preserve rank, model and seed to
+    # prevent ever matching the scores of a different prediction.
+    s = re.sub(r'_(?:scores|relaxed|unrelaxed)_(?=rank_\d+_)', '_', s)
     prefixes = ('summary_confidences_', 'predicted_aligned_error_',
-                'confidences_', 'confidence_', 'full_data_', 'pae_')
+                'confidences_', 'confidence_', 'full_data_', 'pae_',
+                'scores_', 'unrelaxed_', 'relaxed_')
     suffixes = ('_summary_confidences', '_predicted_aligned_error',
                 '_confidences', '_confidence', '_full_data', '_pae')
     changed = True
@@ -39,13 +50,19 @@ def model_key(path):
     return s
 
 
-def _file_role(path):
-    """Classify common predictor filenames, inspect contents only if unknown."""
+def _file_role(path, coord_keys=None):
+    """Classify predictor files, avoiding huge JSON scans when names match."""
     name = path.stem.lower()
     if 'summary_confidences' in name or name.startswith(('confidence_', 'iptm_')) or name.endswith(('_confidence', '_iptm')):
         return 'confidence'
     if ('pae' in name or 'full_data' in name or 'confidences' in name
             or 'predicted_aligned_error' in name):
+        return 'pae'
+    # ColabFold scores JSONs may be named exactly like the corresponding PDB,
+    # or 'scores_<name>.json' against 'unrelaxed_<name>.pdb[.gz]'. The
+    # coordinate match establishes that this is the one candidate PAE file;
+    # read_pae() will still validate the actual data before scoring.
+    if coord_keys is not None and model_key(path) in coord_keys:
         return 'pae'
     # Ambiguous filenames: inspect JSON/NPZ keys. Parse only when needed.
     from .native_iptm import load_json_or_npz, looks_like_pae_obj, looks_like_confidence_obj
@@ -82,12 +99,23 @@ def discover_models(root, recursive=True):
         dirs[:] = sorted(d for d in dirs if d not in SKIP_DIRS and not d.startswith('.')) if recursive else []
         directory = Path(folder)
         coords = sorted((directory / name for name in files
-                         if Path(name).suffix.lower() in COORD_EXTENSIONS and not name.startswith('.')))
+                         if (Path(name).suffix.lower() in COORD_EXTENSIONS
+                             or name.lower().endswith('.pdb.gz')) and not name.startswith('.')))
         if not coords:
             continue
         data_files = sorted(directory / name for name in files
-                            if Path(name).suffix.lower() in DATA_EXTENSIONS and not name.startswith('.'))
-        roles = {p: _file_role(p) for p in data_files}
+                            if (Path(name).suffix.lower() in DATA_EXTENSIONS or name.lower().endswith('.json.gz')) and not name.startswith('.'))
+        # When ColabFold saved both relaxed and unrelaxed copies, score the
+        # unrelaxed model only: these are two coordinate sets for the *same*
+        # PAE prediction. Use relaxed coordinates when unrelaxed is absent.
+        # Other models are unaffected. Do not deduplicate unrelated files.
+        unrelaxed_keys = {model_key(p) for p in coords
+                          if re.search(r'(?:^|_)unrelaxed_rank_\d+_', p.name.lower())}
+        coords = [p for p in coords
+                  if not (model_key(p) in unrelaxed_keys and
+                          re.search(r'(?:^|_)relaxed_rank_\d+_', p.name.lower()))]
+        coord_keys = {model_key(p) for p in coords}
+        roles = {p: _file_role(p, coord_keys=coord_keys) for p in data_files}
         pae_candidates = [p for p in data_files if roles[p] == 'pae']
         confidence_candidates = [p for p in data_files if roles[p] == 'confidence']
         for coord in coords:

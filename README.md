@@ -1,7 +1,7 @@
 # ipSAE2
 
 **Directional PAE-based confidence scoring for biomolecular complexes**  
-**Alpha release · v0.1.5**
+**Alpha release · v0.1.7**
 
 ipSAE2 computes directional interface predicted aligned error (ipSAE) scores
 from predicted coordinates and a PAE matrix. It supports protein, DNA, RNA,
@@ -41,13 +41,17 @@ source path_to_IPSAE2/.venv/bin/activate
 
 ## Run one model
 
-Provide coordinates (`.pdb`, `.cif` or `.mmcif`) and PAE (`.json` or `.npz`),
+Provide coordinates (`.pdb`, `.pdb.gz`, `.cif` or `.mmcif`) and PAE (`.json`, `.json.gz` or `.npz`),
 with an optional native-confidence (`.json` or `.npz`) file **in any order**:
 
 ```bash
 ipsae model.cif full_data.json summary_confidences.json
 ipsae model.cif full_data.json
 ipsae pae_model_0.npz model_0.cif confidence_model_0.json
+# ColabFold 1.5: one JSON holds both PAE and native scalar ipTM
+ipsae RAF1_KSR1_rank001_iptm0.50_ptm0.45_nrx_5_004.pdb.gz RAF1_KSR1_rank001_iptm0.50_ptm0.45_nrx_5_004.json
+# Standard ColabFold 1.5: PDB.gz and scores JSON.gz, including job prefixes
+ipsae job_unrelaxed_rank_001_alphafold2_multimer_v3_model_1_seed_000.pdb.gz job_scores_rank_001_alphafold2_multimer_v3_model_1_seed_000.json.gz
 ```
 
 Options may appear **before, after, or between** input filenames:
@@ -58,8 +62,10 @@ ipsae --output-file result.tsv model.cif full_data.json
 ipsae model.cif --output-file result.tsv full_data.json
 ```
 
-The default result is `model_ipsae.tsv` in the coordinate-file directory.
-Missing native ipTM data is reported as `NA`; it is not an error.
+The default result is `model_ipsae.tsv` in the coordinate-file directory
+(the `.pdb.gz` extension is removed as a unit). Missing native ipTM data is
+reported as `NA`; it is not an error. A scalar overall ipTM is assigned to an
+individual molecular pair only when the structure has exactly two chains.
 
 ## Run a directory of models
 
@@ -77,7 +83,11 @@ ipsae predictions/ --no-recursive --output-file all_ipsae.tsv
 
 The combined TSV starts with a `model` column giving the relative path to each
 input structure. Ambiguous filename matches are skipped with a warning rather
-than incorrectly pairing a PAE matrix with a structure.
+than incorrectly pairing a PAE matrix with a structure. For ColabFold
+results containing both `relaxed_` and `unrelaxed_` models for a given rank,
+model and seed, the unrelaxed structure is used; if only the relaxed model
+is present, it is used instead. ColabFold `scores_*.json.gz` files are read
+directly, without decompression.
 
 ## Try the bundled example
 
@@ -137,6 +147,11 @@ plots and PyMOL selections.
   predictor.
 - **Nucleic acids:** initial AF3 DNA and Boltz-2 RNA tests have been performed.
   Wider DNA/RNA benchmark regression is still needed.
+- **ColabFold 1.5:** PDB or compressed `.pdb.gz` coordinates and the matching
+  single JSON with `pae` and scalar `iptm` have been tested against a real
+  RAF1–KSR1 heterodimer (648 and 923 residues). For two-chain complexes,
+  scalar `iptm` populates the pair's `iptm` column; directional native ipTM
+  columns are `NA`.
 - **Other predictors:** readers are included for additional formats, but
   remain *experimental* pending validation on real output files.
 - **Platforms:** installed and run on Linux and macOS; Windows has not been

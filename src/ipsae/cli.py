@@ -155,6 +155,8 @@ def _score_one(files, args, verbose=True):
                               all_pairs=args.all_pairs)
     coords = Path(data.files[1])
     stem = coords.with_suffix('')
+    if coords.name.lower().endswith('.pdb.gz'):
+        stem = stem.with_suffix('')
     if verbose:
         print(f"ipSAE2 {__version__}: {len(data.tokens)} tokens, {len(geom)} molecules, "
               f"{len(scores)} reported pairs")

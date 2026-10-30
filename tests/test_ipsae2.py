@@ -369,3 +369,144 @@ def test_cli_directory_accepts_either_order(tmp_path, layout):
     assert parsed.files == [str(root)]
     assert parsed.dry_run
     assert parsed.output == str(out)
+
+
+def _make_colabfold_dimer(tmp_path, pdb_name='RAF1_KSR1_rank001_iptm0.50_ptm0.45_nrx_5_004.pdb.gz',
+                          json_name='RAF1_KSR1_rank001_iptm0.50_ptm0.45_nrx_5_004.json'):
+    """Small, chemically plausible ColabFold-like two-chain pair."""
+    import gzip
+    pdb_lines = []
+    for line in (DATA / 'model.pdb').read_text().splitlines():
+        if line.startswith('ATOM'):
+            if line[21] == 'B':
+                x = float(line[30:38]) - 48.0
+                line = line[:30] + f'{x:8.3f}' + line[38:]
+            pdb_lines.append(line)
+    pdb_data = ('\n'.join(pdb_lines) + '\nEND\n').encode()
+    pdb = tmp_path / pdb_name
+    if str(pdb).endswith('.gz'):
+        with gzip.open(pdb, 'wb') as out:
+            out.write(pdb_data)
+    else:
+        pdb.write_bytes(pdb_data)
+    cf = tmp_path / json_name
+    cf_data = json.dumps({
+        'pae': [[0.,2.],[3.,0.]],
+        'iptm': 0.50,
+        'ptm': 0.45,
+        'ptm_matrix': [[1.,0.3],[0.2,1.]],
+        'plddt': [85.,90.],
+    }).encode()
+    if str(cf).endswith('.gz'):
+        with gzip.open(cf, 'wb') as out:
+            out.write(cf_data)
+    else:
+        cf.write_bytes(cf_data)
+    return pdb, cf
+
+
+def test_colabfold_pdb_gz_and_iptm_in_same_json(tmp_path, monkeypatch):
+    pdb, cf = _make_colabfold_dimer(tmp_path)
+    # The JSON must not be loaded a second time by native-confidence parsing.
+    import ipsae.native_iptm as native_mod
+    def unexpected_second_load(_):
+        raise AssertionError('Redundant JSON parse')
+    monkeypatch.setattr(native_mod, 'load_json_or_npz', unexpected_second_load)
+    d = load_model([str(cf), str(pdb)], verbose=False)
+    assert len(d.tokens) == 2
+    assert d.tokens.chain.tolist() == ['A','B']
+    assert d.native.native_iptm.tolist() == [.5,.5]
+    from ipsae.contacts import prepare_geometry
+    table = calculate_scores(d.pae, d.tokens, prepare_geometry(d.atoms), d.native)
+    assert len(table) == 1
+    row = table.iloc[0]
+    assert (row.mol1,row.mol2) == ('AA_1','AA_1')
+    assert row.iptm == .5
+    assert row.ipsae12 == pytest.approx(0.2)
+    assert row.ipsae21 == pytest.approx(0.1)
+    assert row.ipsae == pytest.approx(0.2)
+    assert pd.isna(row.native_iptm12) and pd.isna(row.native_iptm21)
+
+
+def test_colabfold_directory_gzip_and_compact_output_name(tmp_path):
+    root = tmp_path/'colabfold'; root.mkdir()
+    pdb, js = _make_colabfold_dimer(root)
+    from ipsae.batch import discover_models
+    jobs, warnings = discover_models(root)
+    assert len(jobs) == 1 and not warnings
+    assert jobs[0] == (pdb,js,None)
+    output = tmp_path/'combined.tsv'
+    assert main([str(root),'--output-file',str(output)]) == 0
+    assert (root/'RAF1_KSR1_rank001_iptm0.50_ptm0.45_nrx_5_004_ipsae.tsv').exists()
+    combined = pd.read_csv(output,sep='\t')
+    assert len(combined) == 1 and combined.iptm.iloc[0] == .5
+    assert combined.model.iloc[0] == pdb.name
+
+
+def test_colabfold_scores_json_and_unrelaxed_pdb_match(tmp_path):
+    root = tmp_path/'colabfold'; root.mkdir()
+    pdb, js = _make_colabfold_dimer(root,
+        pdb_name='unrelaxed_kinase_rank_001_model_1.pdb.gz',
+        json_name='scores_kinase_rank_001_model_1.json')
+    from ipsae.batch import discover_models
+    jobs, warnings = discover_models(root)
+    assert jobs == [(pdb,js,None)] and not warnings
+    assert main([str(root),'--dry-run']) == 0
+
+
+def test_colabfold_uncompressed_pdb(tmp_path):
+    pdb, js = _make_colabfold_dimer(tmp_path, pdb_name='dimer.pdb', json_name='dimer.json')
+    d = load_model([str(pdb),str(js)],verbose=False)
+    assert d.pae.shape == (2,2)
+    assert d.tokens.chain.tolist() == ['A','B']
+
+
+def test_colabfold_standard_json_gz_single_model(tmp_path):
+    name = 'PP2AA_2AAA_B55A_STRN'
+    suffix = 'rank_001_alphafold2_multimer_v3_model_4_seed_001'
+    pdb, cf = _make_colabfold_dimer(tmp_path,
+        pdb_name=f'{name}_unrelaxed_{suffix}.pdb.gz',
+        json_name=f'{name}_scores_{suffix}.json.gz')
+    # Direct two-file CLI must recognize gzipped PAE and native scalar ipTM.
+    d = load_model([str(pdb),str(cf)], verbose=False)
+    assert d.pae.shape == (2,2)
+    assert d.native.native_iptm.tolist() == [0.5,0.5]
+    output = tmp_path/'direct.tsv'
+    assert main([str(pdb),str(cf),'--output',str(output)]) == 0
+    assert pd.read_csv(output, sep='\t').iptm.iloc[0] == 0.5
+
+
+def test_colabfold_standard_relaxed_and_unrelaxed_one_prediction(tmp_path):
+    name = 'PP2AA_2AAA_B55A_STRN'
+    suffix = 'rank_001_alphafold2_multimer_v3_model_4_seed_001'
+    pdb, cf = _make_colabfold_dimer(tmp_path,
+        pdb_name=f'{name}_unrelaxed_{suffix}.pdb.gz',
+        json_name=f'{name}_scores_{suffix}.json.gz')
+    relaxed = tmp_path / f'{name}_relaxed_{suffix}.pdb.gz'
+    relaxed.write_bytes(pdb.read_bytes())
+    from ipsae.batch import discover_models, model_key
+    assert model_key(pdb) == model_key(cf) == model_key(relaxed)
+    jobs, warnings = discover_models(tmp_path)
+    assert jobs == [(pdb,cf,None)] and not warnings
+    relaxed_only = tmp_path / 'relaxed_only'
+    relaxed_only.mkdir()
+    import shutil
+    shutil.copy2(cf, relaxed_only/cf.name)
+    shutil.copy2(relaxed, relaxed_only/relaxed.name)
+    jobs, warnings = discover_models(relaxed_only)
+    assert jobs == [(relaxed_only/relaxed.name, relaxed_only/cf.name, None)] and not warnings
+
+
+def test_colabfold_standard_full_filenames_40_predictions(tmp_path):
+    # Full 40-model standard ColabFold pattern: each score file has both
+    # relaxed and unrelaxed PDBs. All 40 jobs must be distinct and unambiguous.
+    from ipsae.batch import discover_models
+    prefix = 'PP2AA_2AAA_B55A_STRN'
+    for rank in range(1,41):
+        suffix=f'rank_{rank:03d}_alphafold2_multimer_v3_model_{(rank % 5)+1}_seed_{rank % 8:03d}'
+        for role, ext in [('relaxed','.pdb.gz'),('unrelaxed','.pdb.gz'),('scores','.json.gz')]:
+            (tmp_path/f'{prefix}_{role}_{suffix}{ext}').touch()
+    jobs, warnings = discover_models(tmp_path)
+    assert len(jobs)==40 and not warnings
+    assert len({c.name for c, _, _ in jobs})==40
+    assert all('_unrelaxed_rank_' in c.name and '_scores_rank_' in j.name for c,j,_ in jobs)
