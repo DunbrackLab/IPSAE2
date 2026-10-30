@@ -11,7 +11,7 @@ from pathlib import Path
 COORD_EXTENSIONS = {'.pdb', '.cif', '.mmcif', '.pdb.gz'}
 DATA_EXTENSIONS = {'.json', '.json.gz', '.npz'}
 SKIP_DIRS = {'.git', '.venv', '__pycache__', '.pytest_cache', 'node_modules',
-             'build', 'dist', '.mypy_cache', '.tox'}
+             'build', 'dist', '.mypy_cache', '.tox', 'templates'}
 
 
 def model_key(path):
@@ -21,6 +21,10 @@ def model_key(path):
         s = name[:-7 if name.endswith('.pdb.gz') else -8]
     else:
         s = Path(path).stem.lower()
+    # AF3 Server matches job_model_N.cif with job_full_data_N.json
+    # and job_summary_confidences_N.json, preserving the model number.
+    s = re.sub(r'_(?:model|full_data|summary_confidences)_(\d+)$',
+               lambda m: '_' + m.group(1), s)
     # Standard ColabFold prepends the job name before the file-role marker:
     # job_relaxed_rank_001_...pdb.gz, job_unrelaxed_rank_001_...pdb.gz,
     # job_scores_rank_001_...json.gz. Preserve rank, model and seed to

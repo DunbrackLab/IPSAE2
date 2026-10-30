@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.9-alpha — 2026-10-30
+
+- Support standard AlphaFold3 Server output filenames, matching model_N.cif with full_data_N.json and summary_confidences_N.json.
+- Exclude AF3 Server template structures from recursive directory processing.
+- Add an AF3 Server regression test covering five models and template exclusion; all 35 tests pass.
+
 ## v0.1.8-alpha — 2026-10-30
 
 - Fix ColabFold 1.5 file matching when filenames omit rank numbers, using model and seed identifiers.

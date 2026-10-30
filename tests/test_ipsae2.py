@@ -531,3 +531,32 @@ def test_colabfold_without_rank_in_filenames(tmp_path):
     for pdb, json_file, confidence in jobs:
         assert model_key(pdb) == model_key(json_file)
         assert confidence is None
+
+
+def test_af3_server_directory_matching(tmp_path):
+    """Match AF3 Server model, full_data, and summary files."""
+    from ipsae.batch import discover_models
+
+    job = "fold_kras_raf1_gtpmg"
+
+    for i in range(5):
+        (tmp_path / f"{job}_model_{i}.cif").touch()
+        (tmp_path / f"{job}_full_data_{i}.json").touch()
+        (tmp_path / f"{job}_summary_confidences_{i}.json").touch()
+
+    # AF3 Server template structures must not be scored.
+    templates = tmp_path / "templates"
+    templates.mkdir()
+    (templates / f"{job}_template_hit_0_chains_a.cif").touch()
+
+    jobs, warnings = discover_models(tmp_path)
+
+    assert not warnings
+    assert len(jobs) == 5
+
+    for i, (coords, pae, confidence) in enumerate(
+        sorted(jobs, key=lambda x: x[0].name)
+    ):
+        assert coords.name == f"{job}_model_{i}.cif"
+        assert pae.name == f"{job}_full_data_{i}.json"
+        assert confidence.name == f"{job}_summary_confidences_{i}.json"
