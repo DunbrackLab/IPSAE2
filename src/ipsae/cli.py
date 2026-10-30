@@ -176,7 +176,7 @@ def _batch_mode(args):
     print(f'Found {len(jobs)} model(s) under {root}')
     if args.dry_run:
         for coord, pae, conf in jobs:
-            print(f'{coord.relative_to(root)}  |  {pae.name}  |  {conf.name if conf else "(no native confidence)"}')
+            print(f'{coord.relative_to(root)}  |  {pae.name}  |  {conf.name if conf else "(no separate confidence file)"}')
         return 0
     combined_path = Path(args.output) if args.output else root / 'ipsae_all.tsv'
     if not combined_path.is_absolute():

@@ -25,7 +25,7 @@ def model_key(path):
     # job_relaxed_rank_001_...pdb.gz, job_unrelaxed_rank_001_...pdb.gz,
     # job_scores_rank_001_...json.gz. Preserve rank, model and seed to
     # prevent ever matching the scores of a different prediction.
-    s = re.sub(r'_(?:scores|relaxed|unrelaxed)_(?=rank_\d+_)', '_', s)
+    s = re.sub(r'_(?:scores|relaxed|unrelaxed)_(?=rank_\d+_|alphafold2_)', '_', s)
     prefixes = ('summary_confidences_', 'predicted_aligned_error_',
                 'confidences_', 'confidence_', 'full_data_', 'pae_',
                 'scores_', 'unrelaxed_', 'relaxed_')
@@ -110,10 +110,10 @@ def discover_models(root, recursive=True):
         # PAE prediction. Use relaxed coordinates when unrelaxed is absent.
         # Other models are unaffected. Do not deduplicate unrelated files.
         unrelaxed_keys = {model_key(p) for p in coords
-                          if re.search(r'(?:^|_)unrelaxed_rank_\d+_', p.name.lower())}
+                          if re.search(r'(?:^|_)unrelaxed_(?:rank_\d+_|alphafold2_)', p.name.lower())}
         coords = [p for p in coords
                   if not (model_key(p) in unrelaxed_keys and
-                          re.search(r'(?:^|_)relaxed_rank_\d+_', p.name.lower()))]
+                          re.search(r'(?:^|_)relaxed_(?:rank_\d+_|alphafold2_)', p.name.lower()))]
         coord_keys = {model_key(p) for p in coords}
         roles = {p: _file_role(p, coord_keys=coord_keys) for p in data_files}
         pae_candidates = [p for p in data_files if roles[p] == 'pae']

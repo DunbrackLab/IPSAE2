@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.1.8-alpha — 2026-10-30
+
+- Fix ColabFold 1.5 file matching when filenames omit rank numbers, using model and seed identifiers.
+- Clarify dry-run messages when native ipTM is included in the PAE JSON rather than a separate confidence file.
+- Add a regression test covering 100 ColabFold model/seed combinations; all 34 tests pass.
+
 ## v0.1.7-alpha — 2026-10-30
 
 - Support standard ColabFold 1.5 `scores_*.json.gz` files for both PAE and native scalar ipTM.

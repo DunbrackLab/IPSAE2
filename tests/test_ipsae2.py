@@ -510,3 +510,24 @@ def test_colabfold_standard_full_filenames_40_predictions(tmp_path):
     assert len(jobs)==40 and not warnings
     assert len({c.name for c, _, _ in jobs})==40
     assert all('_unrelaxed_rank_' in c.name and '_scores_rank_' in j.name for c,j,_ in jobs)
+
+
+def test_colabfold_without_rank_in_filenames(tmp_path):
+    """Match ColabFold model/seed files without rank numbers."""
+    from ipsae.batch import discover_models, model_key
+
+    job = "PARP1dom1sh_DPOLQnt291"
+    for model in range(1, 6):
+        for seed in range(20):
+            suffix = f"alphafold2_multimer_v3_model_{model}_seed_{seed:03d}"
+            (tmp_path / f"{job}_unrelaxed_{suffix}.pdb.gz").touch()
+            (tmp_path / f"{job}_scores_{suffix}.json.gz").touch()
+
+    jobs, warnings = discover_models(tmp_path)
+
+    assert not warnings
+    assert len(jobs) == 100
+
+    for pdb, json_file, confidence in jobs:
+        assert model_key(pdb) == model_key(json_file)
+        assert confidence is None
