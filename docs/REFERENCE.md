@@ -1,6 +1,6 @@
 # ipSAE2 — directional PAE-based interaction confidence
 
-**Alpha release 0.1.5** for the ipSAE2 preprint. Built from the
+**Alpha release 0.1.10** for the ipSAE2 preprint. Built from the
 Dunbrack laboratory's `build_pae_data11.py`, `ipsae_scores7.py`, and
 `native_iptm2.py` prototypes. MIT license.
 
@@ -102,6 +102,55 @@ ipsae model.cif pae.json --write-by-token --write-interface --write-pymol
 ipsae model.cif pae.json --write-pae-png --write-pae-df
 ipsae --help
 ```
+
+## Virtual molecules / grouped scoring (v0.1.10)
+
+`--group H+L` makes a combined H+L virtual molecule and appends its scores
+against all other ungrouped entities, while retaining ordinary pairwise rows.
+Use `--group A+B --group C+D` for disjoint groups. To treat the two
+strands of a protein–DNA complex as one DNA entity, use `--group B+C`
+when B and C are the DNA chain IDs in the prediction. Each group must contain
+at least two distinct, existing chain IDs, and no chain may belong to more
+than one group. Multiple group options create one extra row for each contact
+between groups or between a group and an ungrouped molecule; `--all-pairs`
+includes noncontacting group pairs. Member chains are never individually
+compared against their own group.
+
+Group labels are literal `H+L` in `chn1` or `chn2`; `type1/type2` and
+`mol1/mol2` similarly join the component descriptions with `+`. Within a
+group row, `chn1` is the group specified first, followed by the next group
+or ungrouped component. Group rows are appended after original pairs.
+
+**Chain naming:** `.pdb`/`.pdb.gz` use the PDB chain field (author IDs);
+`.cif`/`.mmcif` use `_atom_site.label_asym_id`. For example, PDB 2J88
+has antigen/heavy/light chains `A/H/L` in PDB author identifiers but
+`A/B/C` in mmCIF label identifiers. A prediction may use other IDs.
+
+Group scores are calculated directly from the original PAE matrix, not from
+averaging individual pair scores. Both directions are reported. For group
+rows only, `ipsae` is the maximum defined directional score (ordinary pairs
+follow the existing molecule-type convention below). Native `iptm` and
+`native_iptm12/21` for group rows are `NA`.
+
+For a scored group containing at least one protein, the PAE cutoff applies
+to all constituent scoring units, but the length for protein $d_0$ counts
+only qualifying *protein residues* (once each, even when atom-tokenized).
+When only nucleic acids and nonpolymers occur, PAE filtering applies and
+$d_0$ stays fixed at 2 Å. With only ligands/ions, neither PAE cutoff nor
+protein TM-style $d_0$ is used. In all cases, `n0_12/21` is the total
+number of qualifying scored *units*, including ligand atoms; that is the
+actual normalization denominator and can differ from the protein-only length
+used for $d_0$ in mixed groups.
+
+Grouped comparisons are also included in `--write-by-token` and
+`--write-interface`, and in `--write-pymol` with per-member chain selections.
+For mmCIF files, the generated PyMOL script sets `cif_use_auth, off` so
+PyMOL uses the same `label_asym_id` and polymer residue numbering as ipSAE2.
+For grouped alignment frames, `align_token12/21` and by-token diagnostics
+include the member chain ID (e.g., `B/DA:12:C3'`) so that equivalent
+residue numbers from different chains are not confused. Single-chain rows
+retain their existing token labels. No intramolecular-domain splitting is
+implemented by this option.
 
 ## Pair inclusion and ordering
 

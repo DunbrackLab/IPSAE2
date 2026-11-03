@@ -1,7 +1,7 @@
 # ipSAE2
 
 **Directional PAE-based confidence scoring for biomolecular complexes**  
-**Alpha release · v0.1.9**
+**Alpha release · v0.1.10**
 
 ipSAE2 computes directional interface predicted aligned error (ipSAE) scores
 from predicted coordinates and a PAE matrix. It supports protein, DNA, RNA,
@@ -66,6 +66,67 @@ The default result is `model_ipsae.tsv` in the coordinate-file directory
 (the `.pdb.gz` extension is removed as a unit). Missing native ipTM data is
 reported as `NA`; it is not an error. A scalar overall ipTM is assigned to an
 individual molecular pair only when the structure has exactly two chains.
+
+## Score multiple chains as a single virtual molecule (`--group`)
+
+Append grouped scores *in addition* to the normal chain-by-chain rows. Group
+members are joined by `+`; repeat the flag to declare disjoint groups:
+
+```bash
+# Antibody heavy and light chains against antigen A in a PDB file:
+ipsae predicted.pdb pae.json --group H+L
+
+# The same chains in mmCIF using label_asym_id A (antigen), B (heavy), C (light):
+ipsae predicted.cif pae.json --group B+C
+
+# Two groups, plus any ungrouped components in the structure:
+ipsae model.cif pae.json --group A+B --group C+D
+
+# Protein–double-stranded DNA: A = protein; B and C = the two DNA strands:
+ipsae predicted_protein_dna.cif pae.json --group B+C
+```
+
+For PDB, chain identifiers come from the one-character PDB chain field
+(typically the author IDs). For mmCIF, ipSAE2 reads `_atom_site.label_asym_id`,
+not `_atom_site.auth_asym_id`. For example, PDB entry 2J88 uses author IDs
+`A/H/L` for antigen/heavy/light but label IDs `A/B/C`. The flags must refer
+to the identifiers in the *coordinate file being scored*. A prediction's chain
+IDs may differ from those in a reference crystal structure.
+
+`--group H+L` adds the `H+L` versus other ungrouped molecules, but leaves the
+original `H`/`A` and `L`/`A` scores untouched. With multiple groups, only
+virtual-group-versus-virtual-group and virtual-group-versus-ungrouped rows are
+added (not groups versus their own members). Groups cannot overlap. Groups
+can include more than two molecules or mixed molecular types (e.g., protein
+plus ligand or ligand plus ion). Existing ≤5 Å contact filtering and
+`--all-pairs` apply to group pairs as well.
+
+A virtual group collects the original PAE tokens; it does **not** combine or
+average the separate pairwise scores or define a new reference frame. `ipsae12`
+aligns on `chn1`, scores `chn2`; `ipsae21` aligns on `chn2`, scores `chn1`.
+For grouped rows, `ipsae` is the **maximum of the two valid directions**,
+regardless of group composition; ordinary pairwise scoring retains its original
+same-type/mixed-type convention.
+
+When a scored group contains a protein, all group units with PAE ≤10 Å
+(default) may contribute to the score, but **only qualifying protein residues**
+set the protein length used in $d_0$. With nucleic acids but no protein, the
+PAE cutoff applies and $d_0$ is fixed at 2 Å. With only ligands and ions, no
+PAE cutoff applies and $d_0$ is fixed at 2 Å. Modified polymer residues count
+once even if tokenized by atoms. For mixed groups `n0_12/21` reports *all*
+selected scoring units; protein-only units are used to calculate `d0_12/21`.
+
+New group rows have `NA` in native ipTM columns (the predictors do not supply
+native confidence scores for these virtual pairs). Optional `--write-by-token`,
+`--write-interface`, and `--write-pymol` output supports group rows; PyMOL
+selections refer to the individual member chains, not a literal `H+L` chain.
+The generated PyMOL script sets `cif_use_auth, off` for mmCIF coordinates so
+its chain and residue selections match `label_asym_id`/`label_seq_id`.
+Alignment tokens for a virtual group are prefixed with their original chain
+identifier (for example, `H/VAL:147:CA`) to distinguish residues from
+different members; ordinary pairwise alignment-token labels do not change.
+This feature requires a **predicted PAE matrix**; an experimental PDB structure
+alone does not contain PAE and cannot be scored.
 
 ## Run a directory of models
 

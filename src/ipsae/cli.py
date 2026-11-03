@@ -1,5 +1,6 @@
 """Command line entry point."""
 import argparse
+import re
 import sys
 from pathlib import Path
 import numpy as np
@@ -8,7 +9,7 @@ from . import __version__
 from .readers import load_model
 from .scores import calculate_scores
 from .contacts import prepare_geometry, contact_units
-from .scores import OUTPUT_COLUMNS
+from .scores import OUTPUT_COLUMNS, resolve_groups, entity_contacts
 from .batch import discover_models
 
 
@@ -22,6 +23,8 @@ def parse_args(argv=None):
     ap.add_argument("--fixed-d0", type=float, default=2.0, help="d0 for scored nucleic acids, ligands, and ions (default 2 Å)")
     ap.add_argument("--protein-min-d0", type=float, default=1.0, help="Minimum d0 for scored proteins (default 1 Å)")
     ap.add_argument("--all-pairs", action="store_true", help="Include all molecular pairs, even if not in contact")
+    ap.add_argument("--group", action="append", default=[], metavar="A+B",
+                    help="Append virtual-molecule scores for a group of chains (repeatable: --group H+L --group C+D)")
     ap.add_argument("--output-file", "-output_file", "--output", dest="output", help="Single-model TSV path, or combined TSV path for directory mode")
     ap.add_argument("--no-recursive", action="store_true", help="When given a directory, scan only that directory")
     ap.add_argument("--dry-run", action="store_true", help="List model/PAE/confidence matches in directory mode without scoring")
@@ -57,20 +60,24 @@ def _write_optional(data, options, stem, geom, summary):
                 for j in range(len(chains)):
                     if chains[i] != chains[j]:
                         out.write(f"{i+1}\t{j+1}\t{chains[i]}\t{chains[j]}\t{data.pae[i,j]:.6f}\n")
+    entities = {c: (c,) for c in data.tokens.chain.astype(str).unique()}
+    entities.update(resolve_groups(data.tokens, options.group))
+    chain_arr = data.tokens.chain.to_numpy(dtype=str)
     if options.write_by_token:
         from .scores import score_direction
         rows = []
         for pair in summary.itertuples():
             for aligned, scored, direction in ((pair.chn1,pair.chn2,"12"),(pair.chn2,pair.chn1,"21")):
-                source_idxs = np.flatnonzero(data.tokens.chain.to_numpy() == aligned)
-                target_idxs = np.flatnonzero(data.tokens.chain.to_numpy() == scored)
+                source_idxs = np.flatnonzero(np.isin(chain_arr, entities[aligned]))
+                target_idxs = np.flatnonzero(np.isin(chain_arr, entities[scored]))
                 target_type = str(data.tokens.iloc[target_idxs[0]].type)
-                _, in_contact = contact_units(geom[aligned],geom[scored],options.contact_cutoff)
+                _, in_contact = entity_contacts(geom, entities[aligned], entities[scored], options.contact_cutoff)
                 for ti in source_idxs:
                     if not bool(data.tokens.iloc[ti]["frame_valid"]):
                         continue
                     result = score_direction(data.pae,data.tokens,[ti],target_idxs,target_type,in_contact,
-                                             options.pae_cutoff,options.fixed_d0,options.protein_min_d0)
+                                             options.pae_cutoff,options.fixed_d0,options.protein_min_d0,
+                                             include_chain=len(entities[aligned]) > 1)
                     rows.append(dict(chn1=pair.chn1,chn2=pair.chn2,direction=direction,
                                      align_token=result.best_token,ipsae=result.score,iPAE=result.ipae,
                                      n0=result.n0,d0=result.d0,n_scored_contact=result.ncontact))
@@ -93,15 +100,15 @@ def _write_optional(data, options, stem, geom, summary):
         # criterion. This is purely diagnostic; it never feeds back into ipSAE.
         rows = []
         selections = []
-        chain_arr = data.tokens.chain.to_numpy()
         for pair in summary.itertuples(index=False):
             c1, c2 = pair.chn1, pair.chn2
-            touched1, touched2 = contact_units(geom[c1], geom[c2], options.contact_cutoff)
+            touched1, touched2 = entity_contacts(geom, entities[c1], entities[c2], options.contact_cutoff)
             for chain, other, touched in ((c1,c2,touched1),(c2,c1,touched2)):
-                indices = np.flatnonzero(chain_arr == chain)
-                source = np.flatnonzero((chain_arr == other) & data.tokens.frame_valid.to_numpy(dtype=bool))
-                t = str(data.tokens.iloc[indices[0]].type)
-                if t in ("prot", "nuc"):
+                indices = np.flatnonzero(np.isin(chain_arr, entities[chain]))
+                source = np.flatnonzero(np.isin(chain_arr, entities[other]) &
+                                        data.tokens.frame_valid.to_numpy(dtype=bool))
+                has_polymer = data.tokens.iloc[indices].type.isin(("prot", "nuc")).any()
+                if has_polymer:
                     if len(source):
                         low = data.pae[np.ix_(source, indices)] <= options.pae_cutoff
                         good = set(data.tokens.iloc[indices[np.any(low,axis=0)]].unit_key)
@@ -115,20 +122,34 @@ def _write_optional(data, options, stem, geom, summary):
                     rows.append(dict(chain=chain, partner=other, unit=unit))
                 # PyMOL selections operate at residue level. Atom-specific
                 # ligand tokens are grouped into their parent ligand residue.
-                residues = data.atoms[(data.atoms.chain == chain) &
-                                      (data.atoms.unit_key.isin(selected))]
-                resnums = list(dict.fromkeys(residues.resnum.astype(str)))
-                if resnums:
-                    selections.append((chain,other,"+".join(resnums)))
+                for member in entities[chain]:
+                    residues = data.atoms[(data.atoms.chain == member) &
+                                          (data.atoms.unit_key.isin(selected))]
+                    resnums = list(dict.fromkeys(residues.resnum.astype(str)))
+                    if resnums:
+                        member_type = str(data.tokens.loc[data.tokens.chain == member, "type"].iloc[0])
+                        selections.append((chain, other, member, "+".join(resnums), member_type))
         if options.write_interface:
             pd.DataFrame(rows, columns=["chain", "partner", "unit"]).to_csv(
                 f"{stem}_interface.tsv", sep="\t", index=False)
         if options.write_pymol:
             with open(f"{stem}_interface.pml", "w") as f:
                 f.write("# Contact AND PAE-qualified scored units (no effect on ipSAE).\n")
+                if Path(data.files[1]).suffix.lower() in (".cif", ".mmcif"):
+                    # PyMOL normally loads auth_asym_id/auth_seq_id, whereas
+                    # the scorer uses label_asym_id/label_seq_id for mmCIF.
+                    f.write("set cif_use_auth, off\n")
                 f.write(f'load "{data.files[1]}"\n')
-                for chain,other,resnums in selections:
-                    f.write(f"select color_{chain}_{other}, chain {chain} and resi {resnums}\n")
+                for chain,other,member,resnums,member_type in selections:
+                    label = re.sub(r"[^A-Za-z0-9_]", "_", f"color_{chain}_{other}")
+                    if chain != member:
+                        label += f"_{member}"
+                    # Each ligand/ion is its own molecular chain. Selecting
+                    # the whole chain avoids mismatches in mmCIF where
+                    # nonpolymers lack label_seq_id.
+                    selector = (f"chain {member} and resi {resnums}"
+                                if member_type in ("prot", "nuc") else f"chain {member}")
+                    f.write(f"select {label}, {selector}\n")
 
 
 def _formatted_scores(scores):
@@ -152,7 +173,8 @@ def _score_one(files, args, verbose=True):
                               contact_cutoff=args.contact_cutoff,
                               fixed_d0=args.fixed_d0,
                               protein_min_d0=args.protein_min_d0,
-                              all_pairs=args.all_pairs)
+                              all_pairs=args.all_pairs,
+                              groups=args.group)
     coords = Path(data.files[1])
     stem = coords.with_suffix('')
     if coords.name.lower().endswith('.pdb.gz'):

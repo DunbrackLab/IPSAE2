@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.1.10-alpha — 2026-11-03
+
+- Add repeatable `--group H+L` virtual-molecule scoring, preserving the original
+  chain-by-chain results and adding grouped comparisons to other entities.
+- Support disjoint groups of any size or composition (proteins, nucleic acids,
+  ligands and ions), scored using the original PAE matrix and token frames.
+- For mixed groups containing a protein, compute length-dependent `d0` from
+  PAE-qualified protein residues alone; all eligible group units still
+  contribute to the score. A cutoff applies to mixed polymer-containing groups.
+- Add grouped-row support for `--write-by-token`, `--write-interface`, and
+  `--write-pymol`, and regression tests for mixed d0 and CIF/PDB chain naming.
+- Add a synthetic protein–duplex-DNA mmCIF/PAE regression: two nucleotide
+  chains score as one group with fixed d0=2 Å and nucleotide PAE filtering.
+  Disambiguate grouped alignment-token labels by prefixing their member chain.
+- Native ipTM is unavailable for virtual-molecule rows (`NA`); original
+  native-ipTM values are unchanged.
+
+
 ## v0.1.9-alpha — 2026-10-30
 
 - Support standard AlphaFold3 Server output filenames, matching model_N.cif with full_data_N.json and summary_confidences_N.json.

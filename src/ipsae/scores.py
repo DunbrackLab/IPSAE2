@@ -69,7 +69,7 @@ class DirectionResult:
 
 def score_direction(pae, tokens, aligned_idx, scored_idx, scored_type,
                     scored_contact_units, pae_cutoff=10.0, fixed_d0=2.0,
-                    protein_min_d0=1.0):
+                    protein_min_d0=1.0, include_chain=False):
     """Max over valid reference frames, mean over scored units for each frame."""
     possible = [int(i) for i in aligned_idx if bool(tokens.iloc[i]["frame_valid"])]
     if not possible:
@@ -78,17 +78,25 @@ def score_direction(pae, tokens, aligned_idx, scored_idx, scored_type,
     # atom-tokenized ligands). Scores and PAEs are vectorized over all eligible
     # reference frames. No atom distances or full PAE-pair DataFrame are built.
     unit_keys = [str(tokens.iloc[int(j)]["unit_key"]) for j in scored_idx]
+    # Virtual groups may contain more than one molecular type. A PAE cutoff
+    # applies to *all* scored units when any protein/nucleic acid is present,
+    # whereas the length used for protein d0 counts only qualifying protein
+    # residues (not ligand atoms or nucleotides).
+    scored_types = tokens.iloc[np.asarray(scored_idx, dtype=int)]["type"].to_numpy(dtype=str)
+    use_cutoff = bool(np.isin(scored_types, ("prot", "nuc")).any())
+    has_protein = bool(np.any(scored_types == "prot"))
     if len(set(unit_keys)) == len(unit_keys):
         sub = np.asarray(pae[np.ix_(possible, scored_idx)], dtype=float)
-        if scored_type in ("prot", "nuc"):
+        if use_cutoff:
             mask = np.isfinite(sub) & (sub <= pae_cutoff)
         else:
             if not np.isfinite(sub).all():
                 raise ValueError("Nonfinite ligand/ion PAE: cannot score the whole molecule")
             mask = np.ones_like(sub, dtype=bool)
         counts = mask.sum(axis=1).astype(int)
-        if scored_type == "prot":
-            d0s = np.maximum(protein_min_d0, 1.24 * np.cbrt(np.maximum(counts, 1) - 15.) - 1.8)
+        if has_protein:
+            protein_counts = mask[:, scored_types == "prot"].sum(axis=1).astype(int)
+            d0s = np.maximum(protein_min_d0, 1.24 * np.cbrt(np.maximum(protein_counts, 1) - 15.) - 1.8)
         else:
             d0s = np.full(len(possible), float(fixed_d0), dtype=float)
         tm = 1. / (1. + (sub / d0s[:, None]) ** 2.)
@@ -103,6 +111,8 @@ def score_direction(pae, tokens, aligned_idx, scored_idx, scored_type,
         ncontacts = sum(unit_keys[j] in scored_contact_units for j in np.flatnonzero(good))
         tok = tokens.iloc[possible[best_index]]
         label = f'{tok["resname"]}:{tok["resnum"]}:{tok["atom_name"]}'
+        if include_chain:
+            label = f'{tok["chain"]}/{label}'
         return DirectionResult(float(means[best_index]), ipae, n0,
                                float(d0s[best_index]), int(ncontacts), label)
     groups = OrderedDict()
@@ -110,7 +120,7 @@ def score_direction(pae, tokens, aligned_idx, scored_idx, scored_type,
         key = str(tokens.iloc[int(j)]["unit_key"])
         groups.setdefault(key, []).append(int(j))
     best = None
-    use_cutoff = scored_type in ("prot", "nuc")
+    group_types = {key: str(tokens.iloc[idx[0]]["type"]) for key, idx in groups.items()}
     for i in possible:
         all_values = []
         all_scores = []
@@ -128,8 +138,9 @@ def score_direction(pae, tokens, aligned_idx, scored_idx, scored_type,
                 selected.append(vals)
                 selected_keys.append(key)
         n0 = len(selected)
-        if scored_type == "prot":
-            d0 = protein_d0(n0, protein_min_d0)
+        if has_protein:
+            n_protein = sum(group_types[k] == "prot" for k in selected_keys)
+            d0 = protein_d0(n_protein, protein_min_d0)
         else:
             d0 = float(fixed_d0)
         for vals in selected:
@@ -140,6 +151,8 @@ def score_direction(pae, tokens, aligned_idx, scored_idx, scored_type,
         contact_count = len(set(selected_keys) & scored_contact_units)
         tok = tokens.iloc[i]
         label = f'{tok["resname"]}:{tok["resnum"]}:{tok["atom_name"]}'
+        if include_chain:
+            label = f'{tok["chain"]}/{label}'
         rec = DirectionResult(value, ipae, n0, d0, contact_count, label)
         if best is None or rec.score > best.score:
             best = rec
@@ -167,9 +180,107 @@ def native_pair(native_df, chain1, chain2):
     return val, v12, v21
 
 
+def resolve_groups(tokens, groups=()):
+    """Validate disjoint virtual molecules and return entity-name -> member IDs.
+
+    The returned mapping puts requested groups first, followed by all ungrouped
+    chains in their coordinate-file order. Group labels never replace or alter
+    the underlying chains, residue identifiers, or token order.
+    """
+    chains = list(dict.fromkeys(tokens.chain.astype(str)))
+    known = set(chains)
+    used = set()
+    entities = OrderedDict()
+    for spec in groups or ():
+        members = str(spec).split("+")
+        if len(members) < 2 or any(not m or m != m.strip() for m in members):
+            raise ValueError(f"Invalid --group {spec!r}; use two or more chain IDs joined by '+', e.g. H+L")
+        if len(set(members)) != len(members):
+            raise ValueError(f"Invalid --group {spec!r}: a chain cannot appear twice in one group")
+        unknown = sorted(set(members) - known)
+        if unknown:
+            raise ValueError(f"Unknown chain(s) {', '.join(unknown)} in --group {spec!r}. "
+                             f"Available chain IDs: {', '.join(chains)}. "
+                             "mmCIF uses label_asym_id; PDB uses author chain IDs.")
+        overlap = set(members) & used
+        if overlap:
+            raise ValueError(f"Chain(s) {', '.join(sorted(overlap))} occur in multiple --group options")
+        entities[str(spec)] = tuple(members)
+        used.update(members)
+    for chain in chains:
+        if chain not in used:
+            entities[chain] = (chain,)
+    return entities
+
+
+def entity_contacts(geometries, left, right, cutoff):
+    """Contact sets for disjoint virtual entities, preserving original unit keys."""
+    from .contacts import contact_units
+    a, b = set(), set()
+    for chain1 in left:
+        for chain2 in right:
+            ca, cb = contact_units(geometries[chain1], geometries[chain2], cutoff)
+            a.update(ca)
+            b.update(cb)
+    return a, b
+
+
+def _group_scores(pae, tokens, geometries, groups, pae_cutoff,
+                  contact_cutoff, fixed_d0, protein_min_d0, all_pairs):
+    entities = resolve_groups(tokens, groups)
+    # Only append pairs involving a virtual entity; original pairs are handled
+    # separately, unchanged, in calculate_scores.
+    names = list(entities)
+    n_groups = len(groups)
+    chain_types = dict(zip(tokens.chain.astype(str), tokens.type.astype(str)))
+    original = tokens.chain.astype(str).to_numpy()
+    idx = {name: np.flatnonzero(np.isin(original, members))
+           for name, members in entities.items()}
+    labels = {name: '+'.join(chain_types[c] for c in members)
+              for name, members in entities.items()}
+    descriptions = {name: '+'.join(molecule_label(tokens, c, chain_types[c]) for c in members)
+                    for name, members in entities.items()}
+    rows = []
+    for ai, name1 in enumerate(names):
+        for name2 in names[ai+1:]:
+            if ai >= n_groups:  # Both are original single-chain entities.
+                continue
+            m1, m2 = entities[name1], entities[name2]
+            c1, c2 = entity_contacts(geometries, m1, m2, contact_cutoff)
+            if not (c1 and c2) and not all_pairs:
+                continue
+            # The no-ion/ion rule for original pairs is unchanged; composite
+            # entities are intentionally allowed to include any molecule type.
+            a = score_direction(pae, tokens, idx[name1], idx[name2],
+                                labels[name2], c2, pae_cutoff, fixed_d0, protein_min_d0,
+                                include_chain=len(m1) > 1)
+            b = score_direction(pae, tokens, idx[name2], idx[name1],
+                                labels[name1], c1, pae_cutoff, fixed_d0, protein_min_d0,
+                                include_chain=len(m2) > 1)
+            if b.score is not None and (a.score is None or b.score > a.score):
+                value, source = b.score, 'ipsae21'
+            else:
+                value, source = a.score, 'ipsae12' if a.score is not None else 'NA'
+            t1 = set(chain_types[c] for c in m1)
+            t2 = set(chain_types[c] for c in m2)
+            rows.append(dict(
+                chn1=name1, chn2=name2, type1=labels[name1], type2=labels[name2],
+                mol1=descriptions[name1], mol2=descriptions[name2],
+                iptm=None, ipsae=value, native_iptm12=None, native_iptm21=None,
+                ipsae12=a.score, ipsae21=b.score, ipsae_source=source,
+                iPAE12=a.ipae, iPAE21=b.ipae, n0_12=a.n0, n0_21=b.n0,
+                d0_12=a.d0, d0_21=b.d0,
+                n_scored_contact12=a.ncontact, n_scored_contact21=b.ncontact,
+                pae_cutoff12=(pae_cutoff if t2 & {'prot', 'nuc'} else 'none') if a.score is not None else 'NA',
+                pae_cutoff21=(pae_cutoff if t1 & {'prot', 'nuc'} else 'none') if b.score is not None else 'NA',
+                align_token12=a.best_token, align_token21=b.best_token,
+            ))
+    return pd.DataFrame(rows, columns=OUTPUT_COLUMNS)
+
+
 def calculate_scores(pae, tokens, geometries, native_df=None, pae_cutoff=10.0,
                      contact_cutoff=5.0, fixed_d0=2.0, protein_min_d0=1.0,
-                     all_pairs=False):
+                     all_pairs=False, groups=()):
     if len(tokens) != len(pae):
         raise ValueError("PAE/token count mismatch")
     first = tokens.drop_duplicates("chain", keep="first")
@@ -218,6 +329,10 @@ def calculate_scores(pae, tokens, geometries, native_df=None, pae_cutoff=10.0,
                 pae_cutoff12=cutoff12, pae_cutoff21=cutoff21,
                 align_token12=a.best_token, align_token21=b.best_token,
             ))
+    if groups:
+        grouped = _group_scores(pae, tokens, geometries, groups, pae_cutoff,
+                                contact_cutoff, fixed_d0, protein_min_d0, all_pairs)
+        rows.extend(grouped.to_dict('records'))
     result = pd.DataFrame(rows, columns=OUTPUT_COLUMNS)
     for column in ("n0_12", "n0_21", "n_scored_contact12", "n_scored_contact21"):
         result[column] = pd.array(result[column], dtype="Int64")
