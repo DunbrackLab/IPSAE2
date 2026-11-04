@@ -8,6 +8,8 @@ from predicted coordinates and a PAE matrix. It supports protein, DNA, RNA,
 ligand and ion interactions. It can also import native pairwise ipTM confidence
 scores when the predictor provides them.
 
+The preprint is now available: https://www.biorxiv.org/content/10.64898/2026.11.02.763449v1
+
 This is a **new program and command-line interface**. The original
 [ipSAE implementation](https://github.com/DunbrackLab/IPSAE) remains available
 separately. The new release is suitable for testing and research evaluation;
