@@ -33,6 +33,10 @@ def parse_args(argv=None):
     ap.add_argument("--write-pae-df", action="store_true", help="Large complete interchain directional token-pair PAE table")
     ap.add_argument("--write-by-token", action="store_true", help="Detailed scores for every eligible alignment token")
     ap.add_argument("--write-pae-png", action="store_true")
+    ap.add_argument("--pae-ligand-scale", type=int, choices=range(1, 11), default=1, metavar="1-10",
+                    help="Width multiplier for ligand PAE rows and columns in PNGs (default 1)")
+    ap.add_argument("--pae-include-ions", action="store_true",
+                    help="Include ion tokens in PAE PNGs (by default they are hidden in plots only)")
     ap.add_argument("--write-interface", action="store_true", help="Write contacting-residue selections")
     ap.add_argument("--write-pymol", action="store_true", help="Write PyMOL selections for contacting residues")
     # Accept flags before, after, or between the positional input files.
@@ -84,17 +88,10 @@ def _write_optional(data, options, stem, geom, summary):
         pd.DataFrame(rows,columns=["chn1","chn2","direction","align_token","ipsae","iPAE","n0","d0","n_scored_contact"]).to_csv(
             f"{stem}_ipsae_by_token.tsv",sep="\t",index=False,na_rep="NA",float_format="%.6f")
     if options.write_pae_png:
-        try:
-            import matplotlib.pyplot as plt
-        except ImportError as e:
-            raise RuntimeError("PAE images require pip install 'ipsae2[plot]'") from e
-        fig, ax = plt.subplots(figsize=(6,6))
-        im=ax.imshow(data.pae, origin="upper", cmap="viridis", vmin=0, vmax=32)
-        ax.set_xlabel("Scored token")
-        ax.set_ylabel("Aligned token")
-        fig.colorbar(im, ax=ax, label="PAE (Å)")
-        fig.savefig(f"{stem}_pae.png", dpi=200, bbox_inches="tight")
-        plt.close(fig)
+        from .pae_plot import save_pae_png
+        save_pae_png(data.pae, data.tokens, f"{stem}_pae.png",
+                     ligand_scale=options.pae_ligand_scale,
+                     include_ions=options.pae_include_ions)
     if options.write_interface or options.write_pymol:
         # Optional intersection of spatial contact with the scored-side PAE
         # criterion. This is purely diagnostic; it never feeds back into ipSAE.

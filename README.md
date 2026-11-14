@@ -1,7 +1,7 @@
 # ipSAE2
 
 **Directional PAE-based confidence scoring for biomolecular complexes**  
-**Alpha release · v0.1.10**
+**Alpha release · v0.1.11**
 
 ipSAE2 computes directional interface predicted aligned error (ipSAE) scores
 from predicted coordinates and a PAE matrix. It supports protein, DNA, RNA,
@@ -28,8 +28,7 @@ python -m pip install .
 ipsae --version
 ```
 
-Installed dependencies: NumPy, pandas, SciPy and Gemmi. For optional PAE
-plots, install `python -m pip install '.[plot]'` from the repository.
+Installed dependencies: NumPy, pandas, SciPy, Matplotlib, and Gemmi. 
 
 ## To activate ipSAE in a new terminal session, 
 
@@ -39,10 +38,37 @@ if path_to_IPSAE2 is the IPSAE2 directory above
 source path_to_IPSAE2/.venv/bin/activate
 ```
 
+## Run a directory of models (most common usage)
+
+```bash
+# Inspect auto-discovered coordinate/PAE/confidence matches first:
+ipsae predictions/ --dry-run
+
+# Process recursively, write individual TSVs beside each model,
+# and create one combined file (with a single header):
+ipsae predictions/ --output-file all_ipsae.tsv
+
+# Only examine the given directory, not its subdirectories:
+ipsae predictions/ --no-recursive --output-file all_ipsae.tsv
+
+# Run the files in just the current directory, either with or without recursively searching the sub-folders
+ipsae ./  --output-file all_ipsae.tsv
+ipsae ./  --no-recursive --output-file all_ipsae.tsv
+```
+
+The combined TSV starts with a `model` column giving the relative path to each
+input structure. Ambiguous filename matches are skipped with a warning rather
+than incorrectly pairing a PAE matrix with a structure. For ColabFold
+results containing both `relaxed_` and `unrelaxed_` models for a given rank,
+model and seed, the unrelaxed structure is used; if only the relaxed model
+is present, it is used instead. ColabFold `scores_*.json.gz` files are read
+directly, without decompression.
+
+
 ## Run one model
 
 Provide coordinates (`.pdb`, `.pdb.gz`, `.cif` or `.mmcif`) and PAE (`.json`, `.json.gz` or `.npz`),
-with an optional native-confidence (`.json` or `.npz`) file **in any order**:
+with an optional native-confidence (`.json` or `.npz`) file **in any order**. It is assumed that the order of coordinates has not been changed, because the token order in the PAE matrix may be derived from it.
 
 ```bash
 ipsae model.cif full_data.json summary_confidences.json
@@ -66,6 +92,24 @@ The default result is `model_ipsae.tsv` in the coordinate-file directory
 (the `.pdb.gz` extension is removed as a unit). Missing native ipTM data is
 reported as `NA`; it is not an error. A scalar overall ipTM is assigned to an
 individual molecular pair only when the structure has exactly two chains.
+
+
+## Generate PAE plots
+
+PAE plots include lines separating molecular chains. By default,
+ions are omitted from the plots but remain included in ipSAE
+calculations. Ligand rows and columns can be enlarged by factors
+of 1–10 using --pae-ligand-scale (default 1) to make them visible.
+
+```bash
+ipsae predictions/ --write-pae-png
+
+# Enlarge ligand rows and columns fourfold:
+ipsae predictions/ --write-pae-png --pae-ligand-scale 4
+
+# Include ions in the PAE plots:
+ipsae predictions/ --write-pae-png --pae-include-ions
+```
 
 ## Score multiple chains as a single virtual molecule (`--group`)
 
@@ -127,28 +171,6 @@ identifier (for example, `H/VAL:147:CA`) to distinguish residues from
 different members; ordinary pairwise alignment-token labels do not change.
 This feature requires a **predicted PAE matrix**; an experimental PDB structure
 alone does not contain PAE and cannot be scored.
-
-## Run a directory of models
-
-```bash
-# Inspect auto-discovered coordinate/PAE/confidence matches first:
-ipsae predictions/ --dry-run
-
-# Process recursively, write individual TSVs beside each model,
-# and create one combined file (with a single header):
-ipsae predictions/ --output-file all_ipsae.tsv
-
-# Only examine the given directory, not its subdirectories:
-ipsae predictions/ --no-recursive --output-file all_ipsae.tsv
-```
-
-The combined TSV starts with a `model` column giving the relative path to each
-input structure. Ambiguous filename matches are skipped with a warning rather
-than incorrectly pairing a PAE matrix with a structure. For ColabFold
-results containing both `relaxed_` and `unrelaxed_` models for a given rank,
-model and seed, the unrelaxed structure is used; if only the relaxed model
-is present, it is used instead. ColabFold `scores_*.json.gz` files are read
-directly, without decompression.
 
 ## Try the bundled example
 
@@ -228,9 +250,9 @@ numerically interchangeable.
 
 ## Citation and license
 
+This package is presented in a [**Preprint on biorxiv**](https://doi.org/10.64898/2026.11.02.763449).
+
 This package extends the original ipSAE work:
 [**Dunbrack laboratory — original ipSAE preprint**](https://doi.org/10.1101/2025.02.10.637595).
-A separate ipSAE2 manuscript is in preparation. See [CITATION.cff](CITATION.cff)
-for how to cite this software release in the meantime.
 
 Licensed under the **MIT License**; see [LICENSE](LICENSE).
